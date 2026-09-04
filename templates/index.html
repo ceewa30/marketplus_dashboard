@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Dashboard</title>
+    <!-- TailwindCSS Core Engine (Fixed) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 1. Plotly.js Core Engine (Loaded First) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.24.2/plotly.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans min-h-screen">
+
+    <div class="container mx-auto p-6 max-w-7xl">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-gray-800 pb-5 gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">⚡ MarketPlus Visualizer</h1>
+                <p class="text-sm text-gray-400">Real-time market momentum, sentiment indexing, and algorithmic triggers.</p>
+            </div>
+            
+            <!-- Controls Toolbar Menu -->
+            <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <input type="text" id="tickerInput" value="AAPL" class="bg-gray-900 text-white font-bold uppercase border border-gray-700 px-4 py-2 rounded-lg focus:outline-none focus:border-blue-500 w-full md:w-32">
+                
+                <select id="timeframeSelect" class="bg-gray-900 text-white border border-gray-700 px-4 py-2 rounded-lg focus:outline-none focus:border-blue-500">
+                    <option value="1d">1 Day (Live)</option>
+                    <option value="5d">5 Days</option>
+                    <option value="1mo">1 Month</option>
+                </select>
+                
+                <button onclick="fetchDashboardData()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                    Analyze
+                </button>
+
+                <!-- NEW: Toggle Stream Execution Button Controls -->
+                <button id="streamToggleBtn" onclick="toggleStreamingPipeline()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2">
+                    <span id="statusIndicatorCircle" class="h-2 w-2 rounded-full bg-white animate-pulse"></span>
+                    <span id="streamButtonText">Live Streaming</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Metric Telemetry Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
+            <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl shadow-lg">
+                <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Asset Price</p>
+                <div class="flex items-baseline gap-2 mt-1">
+                    <span id="metricPrice" class="text-2xl font-bold text-white">--</span>
+                    <span id="metricChange" class="text-sm font-medium">--</span>
+                </div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl shadow-lg">
+                <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Momentum (RSI 14)</p>
+                <div class="mt-1 flex items-center gap-2">
+                    <span id="metricRSI" class="text-2xl font-bold text-white">--</span>
+                </div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl shadow-lg">
+                <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Trend Sentiment</p>
+                <div id="metricSentiment" class="text-2xl font-bold mt-1 tracking-wide">--</div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl shadow-lg flex flex-col justify-between">
+                <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Algorithmic Alert Trigger</p>
+                <div id="metricAlert" class="text-center text-sm font-bold text-white py-1 px-3 rounded-md mt-2 tracking-widest transition-colors">WAITING</div>
+            </div>
+        </div>
+
+        <main class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-xl relative w-full overflow-hidden">
+            <div id="loadingOverlay" class="absolute inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center rounded-xl z-50 hidden">
+                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+            </div>
+            <div class="w-full min-h-[600px] h-[600px]">
+                <div id="plotlyChart" class="w-full h-full"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Async Control Scripts Engine -->
+    <script>
+        let executionInterval = null;
+        let isStreamActive = true; // State tracker variable
+        const updateIntervalTime = 10000; // 10 Seconds
+
+        async function fetchDashboardData() {
+            if (typeof Plotly === 'undefined') {
+                alert("Plotly framework offline.");
+                return;
+            }
+
+            const ticker = document.getElementById('tickerInput').value || 'AAPL';
+            const timeframe = document.getElementById('timeframeSelect').value;
+            const loader = document.getElementById('loadingOverlay');
+            
+            // Only flash the overlay during a manual search block to maintain smooth streaming updates
+            if (!executionInterval) loader.classList.remove('hidden');
+
+            try {
+                const response = await fetch(`/api/update-market?ticker=${ticker}&timeframe=${timeframe}`);
+                const data = await response.json();
+                if (data.error) { alert(`Telemetry Error: ${data.error}`); return; }
+
+                document.getElementById('metricPrice').innerText = data.metrics.price;
+                const changeEl = document.getElementById('metricChange');
+                changeEl.innerText = data.metrics.change;
+                changeEl.className = data.metrics.change.includes('-') ? 'text-rose-500 font-semibold' : 'text-emerald-500 font-semibold';
+
+                document.getElementById('metricRSI').innerText = data.metrics.momentum_rsi;
+                const sentimentEl = document.getElementById('metricSentiment');
+                sentimentEl.innerText = data.metrics.sentiment;
+                sentimentEl.className = `text-2xl font-bold mt-1 ${data.metrics.sentiment_color}`;
+
+                const alertBox = document.getElementById('metricAlert');
+                alertBox.innerText = data.metrics.algo_alert;
+                alertBox.className = `text-center text-sm font-bold text-white py-1 px-3 rounded-md mt-2 tracking-widest ${data.metrics.alert_color}`;
+
+                // Smooth rendering update (preserves custom zoom configurations)
+                Plotly.react('plotlyChart', data.graph_json.data, data.graph_json.layout, {responsive: true});
+            } catch (err) {
+                console.error("Telemetry pipeline connection dropped:", err);
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        // NEW: Core Pause/Resume Toggle Switch Logic Engine
+        function toggleStreamingPipeline() {
+            const btn = document.getElementById('streamToggleBtn');
+            const btnText = document.getElementById('streamButtonText');
+            const dot = document.getElementById('statusIndicatorCircle');
+
+            if (isStreamActive) {
+                // Halts current polling loops immediately
+                clearInterval(executionInterval);
+                executionInterval = null;
+                isStreamActive = false;
+
+                // Update UI layout styling variables to show PAUSED state
+                btn.className = "bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2";
+                btnText.innerText = "Stream Paused";
+                dot.classList.remove('animate-pulse');
+            } else {
+                // Resume loop path
+                isStreamActive = true;
+                btn.className = "bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2";
+                btnText.innerText = "Live Streaming";
+                dot.classList.add('animate-pulse');
+                
+                // Fire instantly and re-initialize interval timer pipeline
+                fetchDashboardData();
+                executionInterval = setInterval(fetchDashboardData, updateIntervalTime);
+            }
+        }
+
+        function establishStreamingPipeline() {
+            if (executionInterval) clearInterval(executionInterval);
+            if (isStreamActive) {
+                executionInterval = setInterval(fetchDashboardData, updateIntervalTime);
+                fetchDashboardData();
+            }
+        }
+
+        document.getElementById('timeframeSelect').addEventListener('change', fetchDashboardData);
+        window.onload = establishStreamingPipeline;
+    </script>
+</body>
+</html>
